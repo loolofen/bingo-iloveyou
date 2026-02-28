@@ -1,116 +1,107 @@
 import streamlit as st
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
-import collections
 import random
+import collections
 
-# --- 頁面配置：專為手機觀看優化 ---
-st.set_page_config(page_title="BINGO 數據大師 (AUZO版)", layout="centered")
+# --- 網頁配置：完美適配手機 ---
+st.set_page_config(page_title="BINGO 數據大師", layout="centered")
 
-# 增加一點美化 CSS
 st.markdown("""
     <style>
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; border-radius: 5px; background-color: #f0f2f6; }
-    .stMetric { background-color: #ffffff; padding: 10px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .reportview-container .main .block-container{ padding-top: 1rem; }
+    .stMetric { background: #f0f2f6; padding: 10px; border-radius: 10px; }
+    button[kind="primary"] { background-color: #ff4b4b; border-color: #ff4b4b; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 核心爬蟲：抓取 lotto.auzo.tw ---
-def fetch_auzo_bingo(count=20):
+# --- 核心抓取：模擬 AUZO 數據源 ---
+def get_bingo_data(count=20):
+    # 使用其資料來源的 URL (模擬瀏覽器 header 避開阻擋)
     url = "https://lotto.auzo.tw/bingobingo.php"
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+        "Referer": "https://lotto.auzo.tw/"
     }
     
     try:
         response = requests.get(url, headers=headers, timeout=10)
-        response.encoding = 'utf-8'
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # 由於該站是 PHP 動態渲染，我們直接抓取其 Table 結構並轉為 Dataframe
+        # 這是目前最穩定的「抄用法」方式
+        dfs = pd.read_html(response.text)
+        df = dfs[0] # 通常第一個表格就是資料
         
-        # 尋找開獎表格 (該站點結構：通常在第1個 table)
-        table = soup.find('table')
-        rows = table.find_all('tr')[1:] # 跳過表頭
+        # 整理資料列
+        df.columns = ['期別', '開獎號碼', '超級獎號', '猜大小']
+        df = df.head(count)
         
-        data = []
-        for row in rows[:count]:
-            cols = row.find_all('td')
-            if len(cols) >= 2:
-                # 抓取期號與開獎號碼
-                period = cols[0].get_text(strip=True)
-                # 該網站號碼通常在第二格，且有特定格式
-                nums_text = cols[1].get_text(strip=True)
-                # 提取出數字（過濾掉非數字字符）
-                import re
-                num_list = [int(n) for n in re.findall(r'\d+', nums_text) if int(n) <= 80]
-                
-                if num_list:
-                    data.append({"期別": period, "號碼": num_list})
-        
-        return pd.DataFrame(data)
+        # 將開獎號碼字串轉為數字列表
+        df['號碼列表'] = df['開獎號碼'].apply(lambda x: [int(i) for i in str(x).split(',') if i.isdigit()])
+        return df
     except Exception as e:
-        st.error(f"數據讀取失敗：{e}")
+        st.error(f"數據連線失敗: {e}")
         return pd.DataFrame()
 
-# --- 主程式邏輯 ---
+# --- 主畫面 ---
 st.title("🎰 BINGO 智慧分析儀")
-st.caption("數據來源：AUZO 即時樂透網")
+st.caption("同步 AUZO 即時數據 | 業界機率分析模式")
 
-# 側邊欄參數設定
-num_periods = st.sidebar.slider("分析期數", 10, 50, 20)
-play_style = st.sidebar.radio("目標模式", ["三星", "四星", "五星"])
+# 側邊欄設定
+num_p = st.sidebar.slider("分析期數", 10, 50, 20)
+game_star = st.sidebar.radio("目標玩法", ["三星", "四星", "五星"])
 
-if st.button("🔄 立即抓取最新數據並分析", use_container_width=True):
-    with st.spinner('正在分析 AUZO 即時數據...'):
-        df = fetch_auzo_bingo(num_periods)
+if st.button("🚀 獲取最新強中弱組合", type="primary", use_container_width=True):
+    with st.spinner('正在分析數據規律...'):
+        df = get_bingo_data(num_p)
         
         if not df.empty:
-            # 1. 數據分析
-            all_nums = [n for sub in df['號碼'] for n in sub]
-            freq = collections.Counter(all_nums)
+            # 1. 統計 1-80 號頻率
+            all_n = [n for sublist in df['號碼列表'] for n in sublist]
+            counts = collections.Counter(all_n)
             
-            # 2. 強中弱邏輯切割 (機率切割)
-            # 根據出現次數排序 1-80 號
-            sorted_nums = sorted(range(1, 81), key=lambda x: freq[x], reverse=True)
-            strong = sorted_nums[:20]  # 熱門 (前 25%)
-            weak = sorted_nums[-20:]    # 冷門 (後 25%)
+            # 2. 強中弱機率切割 (業界三分法)
+            # 排序：出現次數多到少
+            sorted_freq = sorted(range(1, 81), key=lambda x: counts[x], reverse=True)
+            strong = sorted_freq[:20]  # 前 25% 為強
+            weak = sorted_freq[-20:]    # 後 25% 為弱
             middle = [i for i in range(1, 81) if i not in strong and i not in weak]
 
-            # 3. 顯示 UI (手機卡片式設計)
-            st.success(f"已同步至最新期別：{df.iloc[0]['期別']}")
+            # 3. 顯示即時狀態 (手機卡片)
+            st.success(f"✅ 已抓取最新期：{df.iloc[0]['期別']}")
             
-            t1, t2 = st.tabs(["🔥 組合建議", "📊 數據報表"])
-            
-            with t1:
-                # 組合建議核心邏輯
-                st.subheader(f"💡 {play_style} 最佳配置")
-                
-                def get_rec(mode, s, m, w):
-                    if mode == "三星":
-                        # 2強 + 1中：穩健型
-                        return f"2強勢 + 1中間 👉 **{sorted(random.sample(s, 2) + random.sample(m, 1))}**"
-                    elif mode == "四星":
-                        # 2強 + 1中 + 1弱：避險型
-                        return f"2強勢 + 1中間 + 1弱勢 👉 **{sorted(random.sample(s, 2) + random.sample(m, 1) + random.sample(w, 1))}**"
-                    else:
-                        # 3強 + 1中 + 1弱：激進型
-                        return f"3強勢 + 1中間 + 1弱勢 👉 **{sorted(random.sample(s, 3) + random.sample(m, 1) + random.sample(w, 1))}**"
-                
-                st.info(get_rec(play_style, strong, middle, weak))
-                
-                # 強中弱號碼分布
-                col1, col2, col3 = st.columns(3)
-                col1.metric("🔴 強勢熱號", f"{strong[0]}")
-                col2.metric("🟡 中間平衡", f"{middle[0]}")
-                col3.metric("🟢 弱勢冷號", f"{weak[0]}")
-                st.write("**當前最強勢 10 碼：**", strong[:10])
+            col1, col2, col3 = st.columns(3)
+            col1.metric("🔴 強勢熱號", f"{len(strong)}個", "Hot")
+            col2.metric("🟡 中間平衡", f"{len(middle)}個", "Mid")
+            col3.metric("🟢 弱勢冷號", f"{len(weak)}個", "Cold")
 
-            with t2:
-                st.write("歷史紀錄 (最新排在最前)")
-                st.dataframe(df, use_container_width=True)
+            st.divider()
+
+            # 4. 針對不同星等的建議組合 (核心邏輯)
+            st.subheader(f"💡 {game_star} 組合建議")
+            
+            def suggest(star, s, m, w):
+                # 業界最高機率策略：2強+1中 或 2強+1中+1弱
+                s_pick = random.sample(s, 2 if star != "五星" else 3)
+                m_pick = random.sample(m, 1)
+                w_pick = random.sample(w, 1)
+                
+                if star == "三星":
+                    return f"建議：**2強 + 1中**\n推薦號碼：`{sorted(s_pick + m_pick)}`"
+                elif star == "四星":
+                    return f"建議：**2強 + 1中 + 1弱**\n推薦號碼：`{sorted(s_pick + m_pick + w_pick)}`"
+                else: # 五星
+                    return f"建議：**3強 + 1中 + 1弱**\n推薦號碼：`{sorted(s_pick + m_pick + w_pick)}`"
+
+            st.info(suggest(game_star, strong, middle, weak))
+            
+            # 5. 強勢號碼明細
+            with st.expander("查看當前強勢號碼清單"):
+                st.write(", ".join(map(str, strong)))
+
+            # 6. 原始數據
+            with st.expander("查看原始數據表格"):
+                st.dataframe(df[['期別', '開獎號碼', '超級獎號']], use_container_width=True)
         else:
-            st.warning("暫時抓不到數據，請確認現在是否為 07:05 ~ 23:55 (開獎時間)。")
+            st.warning("目前非營業時間或網站維護中。")
 
-st.divider()
-st.caption("本工具僅供機率參考。提醒您：小賭怡情，大賭傷神。")
+st.caption("💡 提示：建議在 07:05 之後使用以獲取當日第一期資料。")
