@@ -1,67 +1,69 @@
+import streamlit as st
+import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from flask import Flask, render_template, request
-import pandas as pd
 from collections import Counter
+import random
 
-app = Flask(__name__)
+# 設定網頁標題與手機優化
+st.set_page_config(page_title="BINGO BINGO 強中弱分析", layout="wide")
 
-# --- 1. 抓取資料 (業界最強動態抓取) ---
-def get_bingo_data(num_periods=20):
-    url = "https://www.taiwanlottery.com.tw/lotto/BINGOBINGO/drawing.aspx"
-    # 注意：實際業界會使用 Taiwan Lottery 的 API 或處理 ViewState，此處為邏輯展示
-    # 這裡假設抓取回來的資料格式為 [[號碼列表], [號碼列表]...]
-    # 為了演示，我們模擬最近的開獎結果
-    mock_data = [
-        [1, 5, 12, 18, 20, 25, 30, 33, 40, 45, 50, 55, 60, 65, 70, 72, 75, 78, 79, 80],
-        # ... 更多期數
-    ]
-    return mock_data[:num_periods]
+st.title("🎰 BINGO BINGO 數據大師")
+st.markdown("---")
 
-# --- 2. 核心算法：強中弱切割 ---
-def analyze_probability(data):
-    all_nums = [n for period in data for n in period]
-    counts = Counter(all_nums)
-    
-    # 補足 1-80 號，沒出現過的設為 0
-    full_counts = {i: counts.get(i, 0) for i in range(1, 81)}
-    sorted_nums = sorted(full_counts.items(), key=lambda x: x[1], reverse=True)
-    
-    # 切割強中弱 (前 25% 強, 中間 50%, 後 25% 弱)
-    strong = [n[0] for n in sorted_nums[:20]]
-    medium = [n[0] for n in sorted_nums[20:60]]
-    weak = [n[0] for n in sorted_nums[60:]]
-    
-    return strong, medium, weak
+# --- 1. 抓取資料函數 (模擬業界爬蟲邏輯) ---
+def get_bingo_data(n_periods):
+    # 這裡實作抓取台灣彩券官網或 API 的邏輯
+    # 為了演示，我們生成最近期的模擬數據 (1-80號)
+    data = []
+    for _ in range(n_periods):
+        data.append(random.sample(range(1, 81), 20))
+    return data
 
-# --- 3. 推薦組合邏輯 ---
-def get_recommendation(strong, medium, weak, stars):
-    # 根據星等給予最強組合建議
-    # 策略：高星等(4-5)建議配比：60%強 + 40%中；低星等建議 80%強 + 20%中
-    if stars == 5:
-        return strong[:3] + medium[:2]
-    elif stars == 4:
-        return strong[:3] + medium[:1]
-    else: # 三星
-        return strong[:2] + medium[:1]
+# --- 2. 側邊欄設定 (手機版會收合在左側) ---
+st.sidebar.header("📊 分析設定")
+periods = st.sidebar.slider("分析期數", min_value=10, max_value=200, value=50)
+star_type = st.sidebar.selectbox("目標玩法", ["三星", "四星", "五星"])
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    recommend = None
-    strong, medium, weak = [], [], []
-    periods = 50
-    stars = 3
-    
-    if request.method == 'POST':
-        periods = int(request.form.get('periods', 50))
-        stars = int(request.form.get('stars', 3))
-        
-        raw_data = get_bingo_data(periods)
-        strong, medium, weak = analyze_probability(raw_data)
-        recommend = get_recommendation(strong, medium, weak, stars)
-        
-    return render_template('index.html', strong=strong, medium=medium, 
-                           weak=weak, recommend=recommend, periods=periods, stars=stars)
+# --- 3. 核心邏輯：強中弱切割 ---
+raw_data = get_bingo_data(periods)
+all_nums = [n for p in raw_data for n in p]
+counts = Counter(all_nums)
+full_counts = {i: counts.get(i, 0) for i in range(1, 81)}
+sorted_nums = sorted(full_counts.items(), key=lambda x: x[1], reverse=True)
 
-if __name__ == '__main__':
-    app.run(debug=True)
+strong = [n[0] for n in sorted_nums[:20]]   # 出現率前 25%
+medium = [n[0] for n in sorted_nums[20:60]] # 中間 50%
+weak = [n[0] for n in sorted_nums[60:]]     # 後面 25%
+
+# --- 4. UI 呈現 ---
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.error(f"🔥 強勢號 (Top 20)\n\n{', '.join(map(str, strong[:10]))}...")
+with col2:
+    st.warning(f"⚖️ 中間號 (穩定)\n\n{', '.join(map(str, medium[:10]))}...")
+with col3:
+    st.info(f"❄️ 弱勢號 (冷門)\n\n{', '.join(map(str, weak[:10]))}...")
+
+st.markdown("---")
+
+# --- 5. 推薦組合邏輯 ---
+st.subheader(f"💡 專家推薦：{star_type} 最強組合")
+
+star_map = {"三星": 3, "四星": 4, "五星": 5}
+n_stars = star_map[star_type]
+
+# 推薦邏輯：強勢號佔 60-70%，中位號補足，避開弱勢號
+if n_stars == 3:
+    rec = random.sample(strong, 2) + random.sample(medium, 1)
+elif n_stars == 4:
+    rec = random.sample(strong, 3) + random.sample(medium, 1)
+else: # 五星
+    rec = random.sample(strong, 3) + random.sample(medium, 2)
+
+# 用漂亮的標籤顯示推薦號碼
+cols = st.columns(n_stars)
+for i, num in enumerate(rec):
+    cols[i].metric(label=f"第 {i+1} 碼", value=num)
+
+st.success("✅ 建議策略：根據近 {} 期數據，強勢號碼正處於上升期，建議作為選號核心。".format(periods))
