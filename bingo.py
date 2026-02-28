@@ -4,162 +4,187 @@ import requests
 from bs4 import BeautifulSoup
 from collections import Counter
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import random
 
-# --- 1. 業界最強黑金 UI：極速響應設計 ---
-st.set_page_config(page_title="BINGO 自由配賦戰略終端", layout="wide", initial_sidebar_state="collapsed")
+# --- 1. 頂級賽博黑金 UI 配置 ---
+st.set_page_config(page_title="BINGO 戰爭指揮中心", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
-    [data-testid="stAppViewContainer"] { background: #020205; color: #00d4ff; font-family: 'Consolas', monospace; }
-    .stMetric { background: rgba(0, 212, 255, 0.05); border: 1px solid #00d4ff; border-radius: 8px; padding: 10px; }
+    /* 全域背景與發光字體 */
+    [data-testid="stAppViewContainer"] { background: #000; color: #00ffcc; font-family: 'Consolas', monospace; }
     
-    /* 專業戰術卡片 */
-    .recommend-card { 
-        background: linear-gradient(145deg, #0a0a1a 0%, #151525 100%); 
-        border: 1px solid #00d4ff; color: #fff; padding: 20px; border-radius: 8px;
-        margin-bottom: 15px; border-top: 4px solid #00d4ff;
-        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+    /* 霓虹卡片 */
+    .neon-card { 
+        background: rgba(10, 10, 20, 0.9); border: 2px solid #00ffcc; 
+        border-radius: 12px; padding: 25px; margin-bottom: 20px;
+        box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
     }
-    .tag-container { margin-bottom: 12px; display: flex; gap: 8px; align-items: center;}
-    .tag { padding: 4px 10px; border-radius: 3px; font-size: 0.75rem; font-weight: 800; }
-    .tag-s { background: #ff0055; color: white; box-shadow: 0 0 10px #ff0055aa; } 
-    .tag-m { background: #222; color: #00d4ff; border: 1px solid #00d4ff; } 
-    .tag-w { background: #00ff88; color: #000; box-shadow: 0 0 10px #00ff88aa; }
+    
+    /* 推薦卡片加強版 */
+    .recommend-box {
+        background: linear-gradient(135deg, #121212 0%, #1e1e2f 100%);
+        border: 2px solid #ff00ff; color: #fff; padding: 20px; border-radius: 10px;
+        box-shadow: 0 0 15px rgba(255, 0, 255, 0.3); border-left: 8px solid #ff00ff;
+    }
 
     .stButton>button { 
-        background: #00d4ff; color: #000 !important; font-weight: 900;
-        border-radius: 2px; height: 3.5em; border: none; width: 100%;
-        transition: all 0.2s ease;
+        background: linear-gradient(45deg, #00ffcc, #0055ff); color: #000 !important;
+        font-weight: 900; border-radius: 5px; height: 4em; border: 2px solid #fff;
+        box-shadow: 0 5px 15px rgba(0, 255, 204, 0.4);
     }
-    .stButton>button:hover { background: #fff; box-shadow: 0 0 25px #00d4ff; }
     
-    .ball-box {
-        display: inline-flex; width: 32px; height: 32px; background: #000;
-        border: 1px solid #333; border-radius: 2px; justify-content: center;
-        align-items: center; margin: 2px; font-size: 0.9rem; font-weight: bold;
+    /* 球體動態視覺 */
+    .ball-style {
+        display: inline-flex; width: 34px; height: 34px; background: #000;
+        border: 1px solid #00ffcc; border-radius: 5px; justify-content: center;
+        align-items: center; margin: 3px; font-size: 0.95rem; font-weight: bold;
+        box-shadow: inset 0 0 5px #00ffcc;
     }
-    .strong-ball { border-color: #ff0055; color: #ff0055; }
-    .weak-ball { border-color: #00ff88; color: #00ff88; }
+    .super-ball { background: #ff00ff; border-color: #fff; color: #fff; box-shadow: 0 0 15px #ff00ff; }
+    .miss-high { color: #ff0055; } /* 遺漏太久變紅色 */
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. 高速數據抓取核心 ---
+# --- 2. 強化版數據抓取系統 ---
 @st.cache_data(ttl=300)
-def fetch_history(date_str):
-    url = f"https://lotto.auzo.tw/bingobingo/list_{date_str}.html"
-    try:
-        res = requests.get(url, timeout=10)
-        res.encoding = 'utf-8'
-        soup = BeautifulSoup(res.text, 'html.parser')
-        rows = soup.select('tr.bingo_row')
-        return [{"期數": r.select_one('td.BPeriod').find('b').text.strip(), 
-                 "號碼": [int(d.text) for d in r.find_all('td')[1].find_all('div') if d.text.isdigit()]} 
-                for r in rows if r.select_one('td.BPeriod')]
-    except: return []
+def fetch_multi_days(days=3):
+    today = datetime.now()
+    all_combined = []
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    for i in range(days):
+        d_str = (today - timedelta(days=i)).strftime('%Y%m%d')
+        url = f"https://lotto.auzo.tw/bingobingo/list_{d_str}.html"
+        try:
+            res = requests.get(url, timeout=10)
+            res.encoding = 'utf-8'
+            soup = BeautifulSoup(res.text, 'html.parser')
+            rows = soup.select('tr.bingo_row')
+            for r in rows:
+                p = r.select_one('td.BPeriod').find('b').text.strip()
+                # 抓取開獎球與超級獎號
+                ball_td = r.find_all('td')[1]
+                divs = ball_td.find_all('div')
+                nums = []
+                super_n = None
+                for d in divs:
+                    v = d.text.strip()
+                    if v.isdigit():
+                        num = int(v)
+                        nums.append(num)
+                        if 's' in d.get('class', [''])[0]: super_n = num
+                if len(nums) >= 20:
+                    all_combined.append({"期數": p, "號碼": sorted(nums), "超級獎號": super_n, "日期": d_str})
+        except: continue
+    return all_combined
 
-# --- 3. 狀態初始化 ---
-if 'pool' not in st.session_state: st.session_state.pool = []
+# --- 3. 核心運算：遺漏期數與機率 ---
+def run_heavy_analysis(pool, sample):
+    data = pool[:sample]
+    counts = Counter([n for d in data for n in d['號碼']])
+    super_counts = Counter([d['超級獎號'] for d in data if d['超級獎號']])
+    
+    stats = []
+    latest_draw = data[0]['號碼']
+    for i in range(1, 81):
+        # 頻率
+        freq = counts.get(i, 0) / len(data)
+        # 遺漏 (幾期沒開)
+        miss = 0
+        for d in data:
+            if i in d['號碼']: break
+            miss += 1
+        # 機率標籤 (25% +/- 5%)
+        label = "🔥 強勢" if freq >= 0.30 else ("❄️ 弱勢" if freq <= 0.20 else "⚖️ 中性")
+        stats.append({"號碼": i, "頻率": freq, "次數": counts.get(i, 0), "標籤": label, "遺漏": miss})
+    
+    return pd.DataFrame(stats), super_counts
 
-# --- UI 佈局 ---
-st.title("🛰️ BINGO CUSTOM-STRATEGY X1")
-st.markdown("##### 📍 安南區數據分析中心 · 自定義機率配賦版本")
+# --- 4. UI 終端介面 ---
+st.title("🌌 BINGO WAR-ROOM TERMINAL")
+st.markdown("##### ⚡歷史數據三日鏈路同步")
 
-# 數據源控制區
+if 'full_data' not in st.session_state: st.session_state.full_data = []
+
 with st.sidebar:
-    st.header("📡 數據鏈路系統")
-    if st.button("🔄 同步最近三天開獎紀錄"):
-        today = datetime.now()
-        all_d = []
-        for i in range(3):
-            all_d.extend(fetch_history((today - timedelta(days=i)).strftime('%Y%m%d')))
-        st.session_state.pool = all_d
+    st.header("🛠️ 系統操作")
+    if st.button("📡 同步三日資料庫"):
+        st.session_state.full_data = fetch_multi_days(3)
     
-    if st.session_state.pool:
-        st.write(f"當前資料庫：{len(st.session_state.pool)} 期")
-        sample = st.slider("樣本深度", 30, len(st.session_state.pool), 100)
+    if st.session_state.full_data:
+        st.success(f"目前載入: {len(st.session_state.full_data)} 期")
+        sample_size = st.slider("分析深度(期)", 20, len(st.session_state.full_data), 100)
+        st.divider()
+        st.write("🔧 **選號比例配置**")
+        s_req = st.number_input("幾強", 0, 10, 2)
+        m_req = st.number_input("幾中", 0, 10, 1)
+        w_req = st.number_input("幾弱", 0, 10, 0)
 
-if st.session_state.pool:
-    # 頻率計算
-    work_data = st.session_state.pool[:sample]
-    counts = Counter([n for d in work_data for n in d['號碼']])
-    df = pd.DataFrame([{"號碼": i, "頻率": counts.get(i, 0)/len(work_data)} for i in range(1, 81)])
-    
-    # 機率位移切分 (基線 25%)
-    s_pool = df[df['頻率'] >= 0.30]['號碼'].tolist() # 強勢 > 30%
-    w_pool = df[df['頻率'] <= 0.20]['號碼'].tolist() # 弱勢 < 20%
-    m_pool = df[(df['頻率'] > 0.20) & (df['頻率'] < 0.30)]['號碼'].tolist() # 中性
+if st.session_state.full_data:
+    df, s_counts = run_heavy_analysis(st.session_state.full_data, sample_size)
+    s_pool = df[df['標籤'] == "🔥 強勢"]['號碼'].tolist()
+    m_pool = df[df['標籤'] == "⚖️ 中性"]['號碼'].tolist()
+    w_pool = df[df['標籤'] == "❄️ 弱勢"]['號碼'].tolist()
 
-    # --- 核心操作區 ---
-    st.divider()
-    t1, t2, t3 = st.tabs(["🎯 戰略生成", "📊 分佈矩陣", "📝 原始校驗"])
+    # --- 頂部跑馬燈：當前 TOP 5 熱號 ---
+    top5 = df.sort_values('頻率', ascending=False).head(5)['號碼'].tolist()
+    st.warning(f"🚀 當前戰區最強熱號：{' · '.join([f'{n:02d}' for n in top5])}")
 
-    with t1:
-        st.markdown("### 🛠️ 自定義組合配置器")
-        c1, c2, c3 = st.columns(3)
-        with c1: s_req = st.number_input("強勢號數量", 0, 10, 2)
-        with c2: m_req = st.number_input("中性號數量", 0, 10, 1)
-        with c3: w_req = st.number_input("弱勢號數量", 0, 10, 0)
+    tabs = st.tabs(["🎯 戰略輸出", "📈 深度矩陣", "🔮 超級獎號", "📋 原始校驗"])
+
+    with tabs[0]:
+        st.subheader("🚀 自定義比例生成方案")
+        if st.button("🎲 重新運算選號邏輯"): st.rerun()
         
-        total_balls = s_req + m_req + w_req
-        st.write(f"🔍 目前選號玩法：**{total_balls} 星組合**")
-        
-        if st.button("🎲 依此比例重新生成 4 組方案"):
-            st.rerun()
-
-        st.subheader("🚀 戰術方案輸出")
         cols = st.columns(2)
-        
         for i in range(4):
-            # 防呆：確保池子夠抽
             p_s = random.sample(s_pool, min(len(s_pool), s_req))
             p_m = random.sample(m_pool, min(len(m_pool), m_req))
             p_w = random.sample(w_pool, min(len(w_pool), w_req))
-            
             final_set = sorted(p_s + p_m + p_w)
-            
             with cols[i % 2]:
                 st.markdown(f"""
-                <div class="recommend-card">
-                    <div class="tag-container">
-                        <span class="tag tag-s">{len(p_s)}強</span>
-                        <span class="tag tag-m">{len(p_m)}中</span>
-                        <span class="tag tag-w">{len(p_w)}弱</span>
-                        <span style="margin-left:auto; color:#444;">#{i+1}</span>
-                    </div>
-                    <div style="font-size:2rem; letter-spacing:5px; font-weight:900; color:#fff; text-shadow: 0 0 10px #00d4ff;">
-                        {', '.join([f'{n:02d}' for n in final_set])}
-                    </div>
+                <div class="neon-card">
+                    <div style="font-size:0.8rem; color:#00ffcc;">戰略組合 #{i+1} | {len(final_set)}星玩法</div>
+                    <div style="font-size:2.2rem; font-weight:900; letter-spacing:5px;">{', '.join([f'{n:02d}' for n in final_set])}</div>
+                    <div style="margin-top:10px; font-size:0.75rem; opacity:0.7;">比例：{s_req}強 / {m_req}中 / {w_req}弱</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-    with t2:
-        st.subheader("📈 機率偏移熱圖")
-        st.markdown("<p style='color:#888;'>🔴 強勢(>30%) | ⚪ 中性 | 🟢 弱勢(<20%)</p>", unsafe_allow_html=True)
-        
+    with tabs[1]:
+        st.subheader("📈 80球數據健康報告")
         grid_html = ""
         for n in range(1, 81):
-            f = counts.get(n, 0)/len(work_data)
-            c = "strong-ball" if f >= 0.30 else ("weak-ball" if f <= 0.20 else "")
-            grid_html += f'<div class="ball-box {c}">{n:02d}</div>'
+            row = df[df['號碼'] == n].iloc[0]
+            c_style = "border-color:#ff0055; color:#ff0055;" if row['標籤'] == "🔥 強勢" else ("border-color:#00ff88; color:#00ff88;" if row['標籤'] == "❄️ 弱勢" else "")
+            grid_html += f'<div class="ball-style" style="{c_style}">{n:02d}<br><small style="font-size:0.5rem; color:#555;">{row["遺漏"]}</small></div>'
             if n % 10 == 0: grid_html += "<br>"
         st.markdown(grid_html, unsafe_allow_html=True)
-        
-        # 視覺化圖表
-        df['標籤'] = df['頻率'].apply(lambda x: '強' if x >= 0.30 else ('弱' if x <= 0.20 else '中'))
-        fig = px.bar(df, x='號碼', y='頻率', color='標籤', 
-                     color_discrete_map={'強': '#ff0055', '中': '#333', '弱': '#00ff88'})
-        fig.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig, use_container_width=True)
+        st.caption("球號下方數字為「遺漏期數」：數字越大代表越久沒開出。")
 
-    with t3:
-        st.subheader("🔍 歷史樣本驗證")
-        df_view = pd.DataFrame(work_data)
-        df_view['號碼'] = df_view['號碼'].apply(lambda x: sorted(x))
-        st.table(df_view.head(20))
+    with tabs[2]:
+        st.subheader("🔮 超級獎號分佈圖 (分析深度期數)")
+        s_df = pd.DataFrame(s_counts.items(), columns=['號碼', '次數']).sort_values('次數', ascending=False)
+        fig_s = px.pie(s_df.head(10), values='次數', names='號碼', hole=.4, title="前10大超級獎號分佈")
+        fig_s.update_layout(template="plotly_dark")
+        st.plotly_chart(fig_s, use_container_width=True)
+
+    with tabs[3]:
+        st.subheader("📝 原始數據驗證（全量輸出）")
+        st.write("以下為您篩選的期數完整清單：")
+        
+        # 顯示格式化表格
+        display_df = pd.DataFrame(st.session_state.full_data[:sample_size])
+        display_df['號碼'] = display_df['號碼'].apply(lambda x: ', '.join([f"{n:02d}" for n in x]))
+        st.dataframe(display_df, use_container_width=True, height=500)
+        
+        csv = display_df.to_csv(index=False).encode('utf-8-sig')
+        st.download_button("📥 下載全量原始資料庫 (CSV)", csv, "bingo_full_data.csv", "text/csv")
 
 else:
-    st.warning("⚠️ 請先在左側選單點擊「同步最近三天數據庫」以開啟分析功能。")
+    st.info("🛰️ 系統待命。請在側邊欄點擊「同步最近三天資料庫」以開始作業。")
 
-st.caption("系統警告：此工具僅供安南區戰略研究使用。數據同步自奧索歷史清單。")
+st.caption("🚨 機率僅供參考，強勢號不代表必開，請結合「遺漏期數」進行冷熱交叉選號。")
