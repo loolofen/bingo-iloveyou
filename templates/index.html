@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BINGO BINGO 業界最強分析</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .num-circle { width: 40px; height: 40px; border-radius: 50%; display: inline-flex; 
+                      align-items: center; justify-content: center; margin: 2px; color: white; font-weight: bold; }
+        .bg-strong { background-color: #dc3545; } /* 紅色-強 */
+        .bg-medium { background-color: #ffc107; color: black; } /* 黃色-中 */
+        .bg-weak { background-color: #6c757d; } /* 灰色-弱 */
+        .recommend-box { border: 2px dashed #198754; padding: 20px; border-radius: 10px; background: #f8fff9; }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="container py-4">
+        <h2 class="text-center mb-4">🎰 BINGO BINGO 神準分析器</h2>
+        
+        <form method="POST" class="card p-3 shadow-sm mb-4">
+            <div class="row g-3">
+                <div class="col-6">
+                    <label class="form-label">分析期數</label>
+                    <input type="number" name="periods" class="form-control" value="{{ periods }}">
+                </div>
+                <div class="col-6">
+                    <label class="form-label">選擇星等</label>
+                    <select name="stars" class="form-select">
+                        <option value="3" {% if stars==3 %}selected{% endif %}>三星</option>
+                        <option value="4" {% if stars==4 %}selected{% endif %}>四星</option>
+                        <option value="5" {% if stars==5 %}selected{% endif %}>五星</option>
+                    </select>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary w-100 btn-lg">立即計算強中弱組合</button>
+                </div>
+            </div>
+        </form>
+
+        {% if recommend %}
+        <div class="recommend-box text-center mb-4 shadow">
+            <h4>💡 推薦中獎組合 ({{ stars }}星)</h4>
+            <div class="my-3">
+                {% for n in recommend %}
+                <span class="num-circle bg-success shadow-sm" style="font-size: 1.2rem; width: 50px; height: 50px;">{{ n }}</span>
+                {% endfor %}
+            </div>
+            <p class="text-muted small">* 根據近 {{ periods }} 期強大數據計算得出</p>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4 mb-3">
+                <div class="card border-danger h-100">
+                    <div class="card-header bg-danger text-white">🔥 強勢號碼 (熱門)</div>
+                    <div class="card-body">
+                        {% for n in strong %}<span class="num-circle bg-strong">{{ n }}</span>{% endfor %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="card border-warning h-100">
+                    <div class="card-header bg-warning text-dark">⚖️ 中間號碼 (平穩)</div>
+                    <div class="card-body">
+                        {% for n in medium %}<span class="num-circle bg-medium">{{ n }}</span>{% endfor %}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div class="card border-secondary h-100">
+                    <div class="card-header bg-secondary text-white">❄️ 弱勢號碼 (冷門)</div>
+                    <div class="card-body">
+                        {% for n in weak %}<span class="num-circle bg-weak">{{ n }}</span>{% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
