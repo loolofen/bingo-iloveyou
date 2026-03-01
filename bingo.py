@@ -6,18 +6,19 @@ from collections import Counter
 import plotly.express as px
 from datetime import datetime, timedelta
 import random
-import itertools
+import math
 
 # --- 1. 賽博黑金 UI 配置 ---
-st.set_page_config(page_title="BINGO 數據指揮中心 Pro", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="BINGO 數據指揮中心 V4", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
     [data-testid="stAppViewContainer"] { background: #000; color: #00ffcc; font-family: 'Consolas', monospace; }
+    [data-testid="stSidebar"] { background-color: #050510; border-right: 1px solid #00ffcc; }
     .neon-card { 
-        background: rgba(10, 10, 20, 0.9); border: 2px solid #00ffcc; 
+        background: rgba(10, 10, 20, 0.9); border: 1px solid #00ffcc; 
         border-radius: 10px; padding: 20px; margin-bottom: 15px;
-        box-shadow: 0 0 15px rgba(0, 255, 204, 0.3);
+        box-shadow: 0 0 15px rgba(0, 255, 204, 0.2);
     }
     .stButton>button { 
         background: #00ffcc; color: #000 !important; font-weight: 900;
@@ -28,9 +29,8 @@ st.markdown("""
         border: 1px solid #444; border-radius: 5px; justify-content: center;
         align-items: center; margin: 2px; font-size: 0.9rem; font-weight: bold;
     }
-    .highlight-s { border-color: #ff0055; color: #ff0055; box-shadow: 0 0 8px #ff0055aa; }
-    .highlight-w { border-color: #00ff88; color: #00ff88; box-shadow: 0 0 8px #00ff88aa; }
-    .backtest-box { background: #111; border: 1px dashed #00ffcc; padding: 15px; border-radius: 10px; margin-top: 20px;}
+    .highlight-s { border-color: #ff0055; color: #ff0055; }
+    .highlight-w { border-color: #00ff88; color: #00ff88; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -56,7 +56,11 @@ def fetch_bingo_data(days=3):
         except: continue
     return results
 
-# --- 3. 初始化 ---
+def nCr(n, r):
+    if r < 0 or r > n: return 0
+    return math.comb(n, r)
+
+# --- 3. 側邊欄邏輯開始 ---
 if 'full_data' not in st.session_state: st.session_state.full_data = []
 
 with st.sidebar:
@@ -67,42 +71,76 @@ with st.sidebar:
     if st.session_state.full_data:
         st.success(f"已同步 {len(st.session_state.full_data)} 期")
         sample_size = st.slider("分析深度 (期)", 30, len(st.session_state.full_data), 100)
+        
+        # 1. 先計算強中弱池
+        data = st.session_state.full_data[:sample_size]
+        all_nums = [n for d in data for n in d['號碼']]
+        counts = Counter(all_nums)
+        stats = []
+        for i in range(1, 81):
+            freq = counts.get(i, 0) / len(data)
+            label = "強" if freq >= 0.30 else ("弱" if freq <= 0.20 else "中")
+            stats.append({"號碼": i, "標籤": label})
+        df_stats = pd.DataFrame(stats)
+        s_pool = set(df_stats[df_stats['標籤'] == "強"]['號碼'])
+        m_pool = set(df_stats[df_stats['標籤'] == "中"]['號碼'])
+        w_pool = set(df_stats[df_stats['標籤'] == "弱"]['號碼'])
+
         st.divider()
-        
         st.subheader("🎯 玩法配比設定")
-        star_mode = st.selectbox("選擇星數玩法", options=list(range(1, 11)), index=2) # 預設三星
-        s_count = st.number_input("強勢號數量", 0, star_mode, 2)
-        remaining = star_mode - s_count
-        m_count = st.number_input("中性號數量", 0, remaining, min(remaining, 1))
-        w_count = star_mode - s_count - m_count
+        star_mode = st.selectbox("選擇星數玩法", options=list(range(1, 11)), index=2)
         
-        st.info(f"當前配置：{star_mode}星\n({s_count}強 + {m_count}中 + {w_count}弱)")
+        # --- 重頭戲：全組合機率分佈分析 ---
+        st.write("📊 **歷史全組合配比機率**")
+        
+        distribution = Counter()
+        total_combs_across_all_draws = 0
+        
+        # 遍歷每一期，拆解該期 20 顆球的強中弱組成
+        for d in data:
+            draw_set = set(d['號碼'])
+            d_s = len(draw_set.intersection(s_pool))
+            d_m = len(draw_set.intersection(m_pool))
+            d_w = len(draw_set.intersection(w_pool))
+            
+            # 生成該期所有可能的強中弱配比組合數
+            # 例如玩家選 3 星，我們跑遍 (s+m+w=3) 的所有可能
+            for s in range(star_mode + 1):
+                for m in range(star_mode - s + 1):
+                    w = star_mode - s - m
+                    combs = nCr(d_s, s) * nCr(d_m, m) * nCr(d_w, w)
+                    if combs > 0:
+                        distribution[f"{s}強{m}中{w}弱"] += combs
+                        total_combs_across_all_draws += combs
+        
+        # 轉換為百分比並顯示在左邊
+        if total_combs_across_all_draws > 0:
+            dist_list = []
+            for key, val in distribution.items():
+                prob = (val / total_combs_across_all_draws) * 100
+                dist_list.append({"配比": key, "出現機率": prob})
+            
+            dist_df = pd.DataFrame(dist_list).sort_values("出現機率", ascending=False)
+            st.dataframe(dist_df.style.format({"出現機率": "{:.2f}%"}), hide_index=True)
+            st.caption("※ 以上加總為 100%，代表歷史所有開出組合的分佈。")
 
+        st.divider()
+        s_count = st.number_input("自選：幾強", 0, star_mode, 2)
+        remaining = star_mode - s_count
+        m_count = st.number_input("自選：幾中", 0, remaining, min(remaining, 1))
+        w_count = star_mode - s_count - m_count
+        st.info(f"當前選擇：{s_count}強 {m_count}中 {w_count}弱")
+
+# --- 4. 主畫面邏輯 ---
 if st.session_state.full_data:
-    data = st.session_state.full_data[:sample_size]
-    all_nums = [n for d in data for n in d['號碼']]
-    counts = Counter(all_nums)
-    
-    # 機率計算 (25% 為基準)
-    stats = []
-    for i in range(1, 81):
-        freq = counts.get(i, 0) / len(data)
-        label = "強勢" if freq >= 0.30 else ("弱勢" if freq <= 0.20 else "中性")
-        stats.append({"號碼": i, "頻率": freq, "標籤": label})
-    
-    df = pd.DataFrame(stats)
-    s_pool = set(df[df['標籤'] == "強勢"]['號碼'])
-    m_pool = set(df[df['標籤'] == "中性"]['號碼'])
-    w_pool = set(df[df['標籤'] == "弱勢"]['號碼'])
-
     tabs = st.tabs(["🎯 戰略選號", "📈 機率矩陣", "📋 原始校驗"])
 
     with tabs[0]:
-        # --- 推薦組合顯示 ---
-        st.subheader("🚀 戰術方案輸出")
+        st.subheader(f"🚀 {star_mode}星推薦方案")
         if st.button("🎲 重新生成組合"): st.rerun()
         cols = st.columns(2)
         for i in range(4):
+            # 抽樣邏輯
             p_s = random.sample(list(s_pool), min(len(s_pool), s_count))
             p_m = random.sample(list(m_pool), min(len(m_pool), m_count))
             p_w = random.sample(list(w_pool), min(len(w_pool), w_count))
@@ -110,53 +148,15 @@ if st.session_state.full_data:
             with cols[i % 2]:
                 st.markdown(f"""<div class="neon-card"><div style="font-size:0.8rem; color:#aaa;">RANK {i+1}</div><div style="font-size:2rem; font-weight:900; letter-spacing:3px; color:#fff;">{', '.join([f'{n:02d}' for n in final_set])}</div></div>""", unsafe_allow_html=True)
 
-        # --- 新增功能：歷史組合機率回測 ---
-        st.markdown("---")
-        st.subheader("📊 歷史組合機率回測 (核心大數據)")
-        st.write(f"系統正在掃描過去 **{sample_size}** 期中，每期開出的 20 個號碼裡包含「{s_count}強 {m_count}中 {w_count}弱」組合的次數：")
-        
-        hit_count = 0
-        total_valid_combinations = 0
-        
-        for d in data:
-            draw_set = set(d['號碼'])
-            # 計算該期開出的號碼中，各類別分別有幾個
-            d_s = len(draw_set.intersection(s_pool))
-            d_m = len(draw_set.intersection(m_pool))
-            d_w = len(draw_set.intersection(w_pool))
-            
-            # 使用二項式係數原理，計算該期內能組出多少組符合玩家要求的組合
-            # 例如該期開出 8 強，玩家要 2 強，則有 C(8,2) 種組合
-            import math
-            def combinations(n, k):
-                if k < 0 or k > n: return 0
-                return math.comb(n, k)
-            
-            comb_in_this_draw = combinations(d_s, s_count) * combinations(d_m, m_count) * combinations(d_w, w_count)
-            if comb_in_this_draw > 0:
-                hit_count += 1 # 該期有出現過這種組合
-                total_valid_combinations += comb_in_this_draw
-
-        c_bt1, c_bt2 = st.columns(2)
-        with c_bt1:
-            st.metric("🔥 此比例出現在幾期中", f"{hit_count} 期", f"{hit_count/sample_size*100:.1f}% 涵蓋率")
-        with c_bt2:
-            st.metric("⚖️ 平均每期產出組合數", f"{total_valid_combinations/sample_size:.1f} 組", "產量指數")
-
-        st.caption("註：涵蓋率越高，代表該『強中弱配比』在每一期開獎中出現的機會越頻繁。")
-
     with tabs[1]:
         st.subheader("📊 80球全機率分佈")
         grid_html = ""
         for n in range(1, 81):
-            row = df[df['號碼'] == n].iloc[0]
-            c = "highlight-s" if row['標籤'] == "強勢" else ("highlight-w" if row['標籤'] == "弱勢" else "")
+            row = df_stats[df_stats['號碼'] == n].iloc[0]
+            c = "highlight-s" if row['標籤'] == "強" else ("highlight-w" if row['標籤'] == "弱" else "")
             grid_html += f'<div class="ball-style {c}">{n:02d}</div>'
             if n % 10 == 0: grid_html += "<br>"
         st.markdown(grid_html, unsafe_allow_html=True)
-        fig = px.bar(df, x='號碼', y='頻率', color='標籤', color_discrete_map={"強勢": "#ff0055", "中性": "#333", "弱勢": "#00ff88"})
-        fig.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)')
-        st.plotly_chart(fig, use_container_width=True)
 
     with tabs[2]:
         st.subheader("📝 原始歷史數據核對清單")
