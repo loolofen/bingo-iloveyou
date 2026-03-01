@@ -9,7 +9,7 @@ import random
 import math
 
 # --- 1. 賽博黑金 UI 配置 ---
-st.set_page_config(page_title="BINGO 數據指揮中心 V4", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="BINGO 數據指揮中心 V5", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -31,6 +31,7 @@ st.markdown("""
     }
     .highlight-s { border-color: #ff0055; color: #ff0055; }
     .highlight-w { border-color: #00ff88; color: #00ff88; }
+    .history-hit { color: #ff00ff; font-size: 0.8rem; font-weight: bold; margin-top: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -60,7 +61,7 @@ def nCr(n, r):
     if r < 0 or r > n: return 0
     return math.comb(n, r)
 
-# --- 3. 側邊欄邏輯開始 ---
+# --- 3. 數據與側邊欄邏輯 ---
 if 'full_data' not in st.session_state: st.session_state.full_data = []
 
 with st.sidebar:
@@ -72,7 +73,6 @@ with st.sidebar:
         st.success(f"已同步 {len(st.session_state.full_data)} 期")
         sample_size = st.slider("分析深度 (期)", 30, len(st.session_state.full_data), 100)
         
-        # 1. 先計算強中弱池
         data = st.session_state.full_data[:sample_size]
         all_nums = [n for d in data for n in d['號碼']]
         counts = Counter(all_nums)
@@ -90,63 +90,68 @@ with st.sidebar:
         st.subheader("🎯 玩法配比設定")
         star_mode = st.selectbox("選擇星數玩法", options=list(range(1, 11)), index=2)
         
-        # --- 重頭戲：全組合機率分佈分析 ---
-        st.write("📊 **歷史全組合配比機率**")
-        
+        # 全組合機率分佈分析
         distribution = Counter()
-        total_combs_across_all_draws = 0
-        
-        # 遍歷每一期，拆解該期 20 顆球的強中弱組成
+        total_combs = 0
         for d in data:
             draw_set = set(d['號碼'])
-            d_s = len(draw_set.intersection(s_pool))
-            d_m = len(draw_set.intersection(m_pool))
-            d_w = len(draw_set.intersection(w_pool))
-            
-            # 生成該期所有可能的強中弱配比組合數
-            # 例如玩家選 3 星，我們跑遍 (s+m+w=3) 的所有可能
+            d_s, d_m, d_w = len(draw_set.intersection(s_pool)), len(draw_set.intersection(m_pool)), len(draw_set.intersection(w_pool))
             for s in range(star_mode + 1):
                 for m in range(star_mode - s + 1):
                     w = star_mode - s - m
                     combs = nCr(d_s, s) * nCr(d_m, m) * nCr(d_w, w)
                     if combs > 0:
                         distribution[f"{s}強{m}中{w}弱"] += combs
-                        total_combs_across_all_draws += combs
+                        total_combs += combs
         
-        # 轉換為百分比並顯示在左邊
-        if total_combs_across_all_draws > 0:
-            dist_list = []
-            for key, val in distribution.items():
-                prob = (val / total_combs_across_all_draws) * 100
-                dist_list.append({"配比": key, "出現機率": prob})
-            
-            dist_df = pd.DataFrame(dist_list).sort_values("出現機率", ascending=False)
-            st.dataframe(dist_df.style.format({"出現機率": "{:.2f}%"}), hide_index=True)
-            st.caption("※ 以上加總為 100%，代表歷史所有開出組合的分佈。")
+        if total_combs > 0:
+            dist_list = [{"配比": k, "機率": (v/total_combs)*100} for k, v in distribution.items()]
+            dist_df = pd.DataFrame(dist_list).sort_values("機率", ascending=False)
+            st.dataframe(dist_df.style.format({"機率": "{:.2f}%"}), hide_index=True)
 
         st.divider()
         s_count = st.number_input("自選：幾強", 0, star_mode, 2)
         remaining = star_mode - s_count
         m_count = st.number_input("自選：幾中", 0, remaining, min(remaining, 1))
         w_count = star_mode - s_count - m_count
-        st.info(f"當前選擇：{s_count}強 {m_count}中 {w_count}弱")
 
 # --- 4. 主畫面邏輯 ---
 if st.session_state.full_data:
     tabs = st.tabs(["🎯 戰略選號", "📈 機率矩陣", "📋 原始校驗"])
 
     with tabs[0]:
-        st.subheader(f"🚀 {star_mode}星推薦方案")
-        if st.button("🎲 重新生成組合"): st.rerun()
+        st.subheader(f"🚀 {star_mode}星方案：歷史中獎回測")
+        if st.button("🎲 重新生成組合並回測"): st.rerun()
+        
         cols = st.columns(2)
         for i in range(4):
-            # 抽樣邏輯
+            # 隨機抽樣產生組合
             p_s = random.sample(list(s_pool), min(len(s_pool), s_count))
             p_m = random.sample(list(m_pool), min(len(m_pool), m_count))
             p_w = random.sample(list(w_pool), min(len(w_pool), w_count))
             final_set = sorted(p_s + p_m + p_w)
+            
+            # --- 核心回測邏輯 ---
+            hit_periods = []
+            for d in data:
+                if set(final_set).issubset(set(d['號碼'])):
+                    hit_periods.append(d['期數'])
+            
             with cols[i % 2]:
-                st.markdown(f"""<div class="neon-card"><div style="font-size:0.8rem; color:#aaa;">RANK {i+1}</div><div style="font-size:2rem; font-weight:900; letter-spacing:3px; color:#fff;">{', '.join([f'{n:02d}' for n in final_set])}</div></div>""", unsafe_allow_html=True)
+                st.markdown(f"""
+                <div class="neon-card">
+                    <div style="font-size:0.8rem; color:#aaa;">RANK {i+1} OPTION</div>
+                    <div style="font-size:2rem; font-weight:900; letter-spacing:3px; color:#fff;">
+                        {', '.join([f'{n:02d}' for n in final_set])}
+                    </div>
+                    <div class="history-hit">
+                        🏆 歷史全中次數：{len(hit_periods)} 次
+                    </div>
+                    <div style="font-size:0.75rem; color:#00ffcc; margin-top:5px; word-wrap: break-word;">
+                        {'中獎期數: ' + ', '.join(hit_periods) if hit_periods else '※ 樣本內無中獎紀錄'}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
 
     with tabs[1]:
         st.subheader("📊 80球全機率分佈")
