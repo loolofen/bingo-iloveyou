@@ -9,7 +9,7 @@ import math
 import plotly.express as px
 
 # --- 1. 賽博黑金 UI 配置 ---
-st.set_page_config(page_title="BINGO 數據指揮中心 V8", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="BINGO 數據指揮中心 V9", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -25,6 +25,7 @@ st.markdown("""
     .highlight-s { border-color: #ff0055; color: #ff0055; }
     .highlight-w { border-color: #00ff88; color: #00ff88; }
     .history-hit { color: #ff00ff; font-size: 0.8rem; font-weight: bold; margin-top: 5px; }
+    .ratio-tag { background: #333; padding: 1px 6px; border-radius: 3px; font-size: 0.7rem; color: #00ffcc; border: 1px solid #00ffcc; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -53,7 +54,7 @@ def nCr(n, r):
     if r < 0 or r > n: return 0
     return math.comb(n, r)
 
-# --- 3. 側邊欄：期望值偏移分析 ---
+# --- 3. 側邊欄：校正機率分析 ---
 if 'full_data' not in st.session_state: st.session_state.full_data = []
 
 with st.sidebar:
@@ -64,8 +65,7 @@ with st.sidebar:
     if st.session_state.full_data:
         sample_size = st.slider("分析深度 (期)", 30, len(st.session_state.full_data), 100)
         data = st.session_state.full_data[:sample_size]
-        all_nums = [n for d in data for n in d['號碼']]
-        counts = Counter(all_nums)
+        counts = Counter([n for d in data for n in d['號碼']])
         df_stats = pd.DataFrame([{"號碼": i, "頻率": counts.get(i, 0)/len(data), "次數": counts.get(i, 0)} for i in range(1, 81)])
         df_stats['標籤'] = df_stats['頻率'].apply(lambda x: "強" if x >= 0.30 else ("弱" if x <= 0.20 else "中"))
         
@@ -74,23 +74,17 @@ with st.sidebar:
         w_pool = list(df_stats[df_stats['標籤'] == "弱"]['號碼'])
 
         st.divider()
-        st.subheader("🎯 期望偏移分析")
+        st.subheader("🎯 玩法與校正機率")
         star_mode = st.selectbox("玩法星數", options=list(range(1, 11)), index=2)
         
-        # --- 超強演算法：排除數量因子的偏移率 ---
-        distribution = []
-        total_drawn_combs = 0
-        total_theoretical_combs = nCr(80, star_mode)
-        
-        # 計算每種配比在 80 球中「原本有多少組」 (數量因子)
+        # --- 校正機率演算法 ---
+        biases = []
         for s in range(star_mode + 1):
             for m in range(star_mode - s + 1):
                 w = star_mode - s - m
-                # 理論組數：從強球選s, 中球選m, 弱球選w
-                theoretical_ways = nCr(len(s_pool), s) * nCr(len(m_pool), m) * nCr(len(w_pool), w)
-                if theoretical_ways == 0: continue
+                theo_ways = nCr(len(s_pool), s) * nCr(len(m_pool), m) * nCr(len(w_pool), w)
+                if theo_ways == 0: continue
                 
-                # 實際在歷史開獎中「出現了幾組」
                 actual_found = 0
                 for d in data:
                     draw_set = set(d['號碼'])
@@ -99,24 +93,20 @@ with st.sidebar:
                     d_w = len([n for n in draw_set if n in w_pool])
                     actual_found += nCr(d_s, s) * nCr(d_m, m) * nCr(d_w, w)
                 
-                # 計算偏移率 = (實際組數/樣本期數) / (理論組數/理論總組數)
-                # 這代表：相對於它的球數基數，這種組合是否更容易被開出
-                theoretical_prob = theoretical_ways / total_theoretical_combs
-                actual_avg_per_draw = actual_found / len(data)
-                
-                # 偏移倍率：大於 1 代表是真正的熱門組合
-                bias = actual_avg_per_draw / (theoretical_prob * 20) # 修正係數
-                
-                distribution.append({
-                    "配比": f"{s}強{m}中{w}弱",
-                    "偏移倍率": bias,
-                    "S": s, "M": m, "W": w
-                })
+                # 計算偏移權重
+                bias_val = (actual_found / len(data)) / (theo_ways / nCr(80, star_mode) * 20)
+                biases.append({"配比": f"{s}強{m}中{w}弱", "B": bias_val, "S": s, "M": m, "W": w})
         
-        dist_df = pd.DataFrame(distribution).sort_values("偏移倍率", ascending=False)
-        st.write("📈 **排除數量因子後的熱度排行榜**")
-        st.dataframe(dist_df[["配比", "偏移倍率"]].style.format({"偏移倍率": "{:.2f}x"}), hide_index=True)
-        st.caption("※ 倍率 > 1 代表該配比比理論上更容易開出。")
+        # 將偏移值轉換為百分比 (Normalized)
+        total_bias = sum([b['B'] for b in biases])
+        if total_bias > 0:
+            for b in biases:
+                b['校正機率'] = (b['B'] / total_bias) * 100
+        
+        dist_df = pd.DataFrame(biases).sort_values("校正機率", ascending=False)
+        st.write("📈 **排除球數因子後的信心排名**")
+        st.dataframe(dist_df[["配比", "校正機率"]].style.format({"校正機率": "{:.1f}%"}), hide_index=True)
+        st.caption("※ 此機率已排除球數基數影響。")
 
         st.divider()
         s_count = st.number_input("幾強", 0, star_mode, int(dist_df.iloc[0]['S']))
@@ -137,17 +127,27 @@ if st.session_state.full_data:
             hit_periods = [d['期數'] for d in data if set(final_set).issubset(set(d['號碼']))]
             with cols[i % 2]:
                 st.markdown(f"""<div class="neon-card">
-                    <div style="font-size:1.8rem; font-weight:900; color:#fff;">{', '.join([f'{n:02d}' for n in final_set])}</div>
+                    <div style="display:flex; justify-content:space-between;"><span style="color:#aaa;">OPTION #{i+1}</span><span class="ratio-tag">{len(p_s)}強 {len(p_m)}中 {len(p_w)}弱</span></div>
+                    <div style="font-size:1.8rem; font-weight:900; color:#fff; margin:10px 0;">{', '.join([f'{n:02d}' for n in final_set])}</div>
                     <div class="history-hit">🏆 歷史全中：{len(hit_periods)} 次</div>
                     <div style="font-size:0.7rem; color:#00ffcc; height:40px; overflow-y:auto;">{'期數: '+', '.join(hit_periods) if hit_periods else '※ 無中獎紀錄'}</div>
                 </div>""", unsafe_allow_html=True)
     with t2:
+        st.subheader("📉 各號碼開出總次數 (X=號碼, Y=次數)")
         fig = px.bar(df_stats, x='號碼', y='次數', color='標籤', color_discrete_map={"強": "#ff0055", "中": "#333", "弱": "#00ff88"})
         fig.update_layout(template="plotly_dark", plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig, use_container_width=True)
+        st.subheader("📌 80球機率矩陣")
+        grid_html = ""
+        for n in range(1, 81):
+            row = df_stats[df_stats['號碼'] == n].iloc[0]
+            c = "highlight-s" if row['標籤'] == "強" else ("highlight-w" if row['標籤'] == "弱" else "")
+            grid_html += f'<div class="ball-style {c}">{n:02d}</div>'
+            if n % 10 == 0: grid_html += "<br>"
+        st.markdown(grid_html, unsafe_allow_html=True)
     with t3:
         display_df = pd.DataFrame(st.session_state.full_data)
-        display_df['號碼'] = display_df['號碼'].apply(lambda x: ', '.join([f"{n:02d}" for n in x]))
-        st.dataframe(display_df[['期數', '日期', '號碼']], use_container_width=True, height=600)
+        display_df['號碼清單'] = display_df['號碼'].apply(lambda x: ', '.join([f"{n:02d}" for n in x]))
+        st.dataframe(display_df[['期數', '日期', '號碼清單']], use_container_width=True, height=600)
 else:
     st.info("請先點擊側邊欄「同步資料庫」。")
